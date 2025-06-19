@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lukia's Music Player</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+    <style>
+        :root {
+            --theme-color: #6c5ce7; --theme-color-light: #a29bfe;
+            --bg-color-dark: #121212; --surface-color-dark: #1e1e1e; --text-color-dark: #e0e0e0; --text-muted-dark: #8d8d8d; --border-color-dark: #2c2c2c;
+            --bg-color-light: #f0f2f5; --surface-color-light: #ffffff; --text-color-light: #1a1a1a; --text-muted-light: #6c757d; --border-color-light: #dee2e6;
+            --bg-color: var(--bg-color-dark); --surface-color: var(--surface-color-dark); --text-color: var(--text-color-dark); --text-color-muted: var(--text-muted-dark); --border-color: var(--border-color-dark);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        body.light-mode {
+            --bg-color: var(--bg-color-light); --surface-color: var(--surface-color-light); --text-color: var(--text-color-light); --text-color-muted: var(--text-muted-light); --border-color: var(--border-color-light);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Sarasa Mono SC', '等距更纱黑体 SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px;
+        }
+        .player-container {
+            width: 100%; max-width: 420px; background-color: var(--surface-color); border-radius: 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            padding: 25px; display: flex; flex-direction: column; gap: 25px; transition: background-color 0.3s ease;
+        }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 1.2em; font-weight: 700; color: var(--theme-color); display: flex; align-items: center; gap: 8px; }
+        .controls { display: flex; gap: 15px; align-items: center; }
+        .icon-btn { background: none; border: none; cursor: pointer; color: var(--text-color-muted); transition: color 0.3s ease; padding: 0; }
+        .icon-btn:hover, .icon-btn.active { color: var(--theme-color); }
+        .icon-btn svg { width: 24px; height: 24px; }
+        #folder-picker { display: none; }
+        .icon-moon { display: block; } .icon-sun { display: none; }
+        body.light-mode .icon-moon { display: none; } body.light-mode .icon-sun { display: block; }
+        
+        @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .marquee-container { overflow: hidden; white-space: nowrap; }
+        .marquee-inner-wrap { display: inline-block; }
+        .marquee-container.is-overflowing .marquee-inner-wrap span:first-child { padding-right: 50px; }
+        .now-playing .marquee-container.is-overflowing .marquee-inner-wrap,
+        #playlist li.playing .marquee-container.is-overflowing .marquee-inner-wrap { animation: marquee 15s linear infinite; }
+        
+        .now-playing { text-align: center; display: flex; flex-direction: column; gap: 4px; }
+        #now-playing-title { font-size: 1.1em; font-weight: 700; color: var(--text-color); }
+        #now-playing-artist { font-size: 0.9em; color: var(--text-color-muted); }
+        #now-playing-album { font-size: 0.85em; color: var(--text-color-muted); font-style: italic; } /* 1. 减小专辑名字体 */
+
+        .visualizer-container { width: 100%; height: 80px; background-color: #000; border-radius: 10px; overflow: hidden; }
+        #visualizer { width: 100%; height: 100%; }
+        
+        audio { display: none; }
+        .player-controls-main { display: flex; align-items: center; gap: 12px; }
+        #main-play-btn { color: var(--theme-color); }
+        #main-play-btn svg { width: 48px; height: 48px; }
+        #main-play-btn .icon-pause { display: none; }
+        .time-display { font-size: 0.8em; color: var(--text-color-muted); flex-shrink: 0; width: 40px; text-align: center; }
+        .progress-bar-container { flex-grow: 1; padding-top: 16px; }
+        #progress-bar { height: 6px; background-color: var(--border-color); border-radius: 3px; cursor: pointer; position: relative; }
+        #progress-filled { height: 100%; width: 0; background-color: var(--theme-color); border-radius: 3px; position: relative; transition: width 0.1s linear; }
+        #progress-filled::after { content: ''; position: absolute; right: -6px; top: -3px; width: 12px; height: 12px; border-radius: 50%; background-color: var(--theme-color-light); }
+
+        .volume-control { position: relative; }
+        .volume-btn svg { display: none; }
+        .volume-btn.volume-state-high .icon-volume-2,
+        .volume-btn.volume-state-low .icon-volume-1,
+        .volume-btn.volume-state-muted .icon-volume-off,
+        .volume-btn.volume-state-none .icon-volume { display: block; }
+        
+        .volume-slider-popup {
+            position: absolute; bottom: calc(100% + 12px); left: 50%; /* 3. 调整位置 */
+            transform: translateX(-50%);
+            background-color: var(--surface-color);
+            padding: 2px 12px 8px; /* 3. 调整 padding */
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            border: 1px solid var(--border-color);
+            visibility: hidden; opacity: 0;
+            transition: visibility 0.2s, opacity 0.2s ease;
+        }
+        .volume-slider-popup.visible { visibility: visible; opacity: 1; }
+        #volume-slider {
+            -webkit-appearance: none; appearance: none; width: 100px; height: 4px;
+            background-color: var(--border-color); border-radius: 2px;
+            outline: none; cursor: pointer;
+        }
+        #volume-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: var(--theme-color-light); border-radius: 50%; }
+        #volume-slider::-moz-range-thumb { width: 14px; height: 14px; background: var(--theme-color-light); border-radius: 50%; border: none; }
+
+        .search-container { position: relative; display: flex; align-items: center; }
+        .search-icon { position: absolute; left: 15px; color: var(--text-color-muted); width: 18px; height: 18px; }
+        #search-input {
+            width: 100%; background-color: var(--bg-color); border: 1px solid var(--border-color);
+            border-radius: 10px; padding: 10px 15px 10px 45px; color: var(--text-color);
+            font-family: inherit; font-size: 0.9em; outline: none; transition: border-color 0.3s ease, background-color 0.3s ease;
+        }
+        #search-input:focus { border-color: var(--theme-color); }
+
+        .playlist-container { max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 10px; transition: border-color 0.3s ease; }
+        .playlist-container::-webkit-scrollbar { width: 8px; } .playlist-container::-webkit-scrollbar-track { background: var(--surface-color); }
+        .playlist-container::-webkit-scrollbar-thumb { background-color: var(--theme-color); border-radius: 10px; border: 2px solid var(--surface-color); }
+        #playlist { list-style: none; }
+        #playlist li { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease; } /* 4. 移除 gap */
+        #playlist li:last-child { border-bottom: none; }
+        #playlist li:hover { background-color: rgba(108, 92, 231, 0.1); }
+        #playlist li.playing { background-color: rgba(108, 92, 231, 0.2); color: var(--theme-color-light); font-weight: 700; }
+        body.light-mode #playlist li.playing { color: var(--theme-color); }
+        /* 4. 列表布局调整 */
+        #playlist li .play-indicator {
+            width: 0; height: 16px; flex-shrink: 0;
+            opacity: 0; color: var(--theme-color);
+            transition: width 0.2s ease, opacity 0.2s ease, margin-right 0.2s ease;
+        }
+        #playlist li.playing .play-indicator {
+            width: 16px; opacity: 1; margin-right: 15px;
+        }
+        .pli-info { flex-grow: 1; overflow: hidden; }
+        .pli-title { font-weight: 700; display: block; }
+        .pli-artist { font-size: 0.85em; color: var(--text-color-muted); display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+        .pli-duration { font-size: 0.85em; color: var(--text-color-muted); margin-left: auto; flex-shrink: 0; padding-left: 15px; }
+        
+        mark { background-color: var(--theme-color-light); color: var(--bg-color-dark); padding: 1px 2px; border-radius: 3px; }
+        body.light-mode mark { color: var(--bg-color-light); }
+        
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .loading-indicator { display: flex; align-items: center; gap: 10px; }
+        .loading-indicator svg { animation: spin 1s linear infinite; }
+    </style>
+</head>
+<body>
+
+    <div class="player-container">
+        <header class="header">
+            <h1>
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="18" r="4"/><path d="M12 18V2l7 4"/></svg>
+                Lukia 的播放器
+            </h1>
+            <div class="controls">
+                <button id="theme-toggle-btn" class="icon-btn" title="切换主题">
+                    <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+                    <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+                </button>
+                <button id="shuffle-btn" class="icon-btn" title="随机播放">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22"/><path d="M2 6h1.972a4 4 0 0 1 3.6 2.2"/><path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/></svg>
+                </button>
+                <label for="folder-picker" class="icon-btn" title="选择文件夹">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+                </label>
+                <input type="file" id="folder-picker" webkitdirectory directory multiple>
+            </div>
+        </header>
+        <div class="now-playing">
+            <div id="now-playing-title" class="marquee-container"></div>
+            <div id="now-playing-artist" class="marquee-container"></div>
+            <div id="now-playing-album" class="marquee-container"></div>
+        </div>
+        <div class="visualizer-container"><canvas id="visualizer"></canvas></div>
+        
+        <audio id="audio-player"></audio>
+        <div class="player-controls-main">
+            <button id="main-play-btn" class="icon-btn">
+                <!-- 2. 减小线条宽度 -->
+                <svg class="icon-play" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                <svg class="icon-pause" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="10" x2="10" y1="15" y2="9"/><line x1="14" x2="14" y1="15" y2="9"/></svg>
+            </button>
+            <div class="progress-bar-container">
+                <div id="progress-bar"><div id="progress-filled"></div></div>
+                <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                    <span id="current-time" class="time-display">0:00</span>
+                    <span id="total-duration" class="time-display">0:00</span>
+                </div>
+            </div>
+            <div class="volume-control">
+                <button class="icon-btn volume-btn">
+                    <svg class="icon-volume-off" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 9a5 5 0 0 1 .95 2.293"/><path d="M19.364 5.636a9 9 0 0 1 1.889 9.96"/><path d="m2 2 20 20"/><path d="m7 7-.587.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298V11"/><path d="M9.828 4.172A.686.686 0 0 1 11 4.657v.686"/></svg>
+                    <svg class="icon-volume" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/></svg>
+                    <svg class="icon-volume-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/></svg>
+                    <svg class="icon-volume-2" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>
+                </button>
+                <div class="volume-slider-popup">
+                    <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
+                </div>
+            </div>
+        </div>
+        
+        <div class="search-container">
+            <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+            <input type="text" id="search-input" placeholder="关键词搜索...">
+        </div>
+
+        <div class="playlist-container"><ul id="playlist"></ul></div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const folderPicker = document.getElementById('folder-picker');
+        const audioPlayer = document.getElementById('audio-player');
+        const playlistElement = document.getElementById('playlist');
+        const shuffleBtn = document.getElementById('shuffle-btn');
+        const themeToggleBtn = document.getElementById('theme-toggle-btn');
+        const searchInput = document.getElementById('search-input');
+        const nowPlayingTitle = document.getElementById('now-playing-title');
+        const nowPlayingArtist = document.getElementById('now-playing-artist');
+        const nowPlayingAlbum = document.getElementById('now-playing-album');
+        const visualizerCanvas = document.getElementById('visualizer');
+        const canvasCtx = visualizerCanvas.getContext('2d');
+        // Custom Player DOM Elements
+        const mainPlayBtn = document.getElementById('main-play-btn');
+        const playIcon = mainPlayBtn.querySelector('.icon-play');
+        const pauseIcon = mainPlayBtn.querySelector('.icon-pause');
+        const currentTimeEl = document.getElementById('current-time');
+        const totalDurationEl = document.getElementById('total-duration');
+        const progressBar = document.getElementById('progress-bar');
+        const progressFilled = document.getElementById('progress-filled');
+        const volumeControl = document.querySelector('.volume-control');
+        const volumeBtn = volumeControl.querySelector('.volume-btn');
+        const volumeSliderPopup = volumeControl.querySelector('.volume-slider-popup');
+        const volumeSlider = document.getElementById('volume-slider');
+
+        // State
+        let playlistData = [];
+        let currentTrackIndex = -1;
+        let isShuffle = false;
+        let lastVolume = 1;
+
+        // Web Audio API
+        let audioContext, analyser, sourceNode, animationFrameId;
+        let isApiInitialized = false;
+
+        // --- Initial Load & Event Listeners ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadThemePreference();
+            loadShufflePreference();
+            updateNowPlaying({ title: '未选择歌曲', artist: '请先选择一个文件夹' });
+            updateVolumeUI(audioPlayer.volume, audioPlayer.muted);
+            document.addEventListener('click', (e) => { if (!volumeControl.contains(e.target)) volumeSliderPopup.classList.remove('visible'); });
+        });
+        folderPicker.addEventListener('change', handleFolderSelection);
+        playlistElement.addEventListener('click', handlePlaylistClick);
+        shuffleBtn.addEventListener('click', toggleShuffle);
+        themeToggleBtn.addEventListener('click', toggleTheme);
+        searchInput.addEventListener('input', handleSearch);
+        // Audio & Custom Controls Events
+        audioPlayer.addEventListener('ended', playNextSong);
+        audioPlayer.addEventListener('play', () => { playIcon.style.display = 'none'; pauseIcon.style.display = 'block'; startVisualization(); });
+        audioPlayer.addEventListener('pause', () => { playIcon.style.display = 'block'; pauseIcon.style.display = 'none'; stopVisualization(); });
+        audioPlayer.addEventListener('timeupdate', updateProgress);
+        audioPlayer.addEventListener('loadedmetadata', () => { totalDurationEl.textContent = formatDuration(audioPlayer.duration); });
+        audioPlayer.addEventListener('volumechange', () => updateVolumeUI(audioPlayer.volume, audioPlayer.muted));
+        mainPlayBtn.addEventListener('click', () => { if (audioPlayer.src) audioPlayer.paused ? audioPlayer.play() : audioPlayer.pause(); });
+        progressBar.addEventListener('click', setProgress);
+        volumeBtn.addEventListener('click', (e) => { e.stopPropagation(); volumeSliderPopup.classList.toggle('visible'); });
+        volumeSlider.addEventListener('input', (e) => { audioPlayer.muted = false; audioPlayer.volume = e.target.value; });
+
+        // --- Preference & State Management ---
+        function loadThemePreference() { const savedTheme = localStorage.getItem('theme'); if (savedTheme === 'light') document.body.classList.add('light-mode'); }
+        function toggleTheme() { document.body.classList.toggle('light-mode'); localStorage.setItem('theme', document.body.classList.contains('light-mode') ? 'light' : 'dark'); }
+        function loadShufflePreference() { isShuffle = localStorage.getItem('isShuffle') === 'true'; shuffleBtn.classList.toggle('active', isShuffle); shuffleBtn.title = isShuffle ? '关闭随机播放' : '开启随机播放'; }
+        function toggleShuffle() { isShuffle = !isShuffle; localStorage.setItem('isShuffle', isShuffle); shuffleBtn.classList.toggle('active', isShuffle); shuffleBtn.title = isShuffle ? '关闭随机播放' : '开启随机播放'; }
+
+        // --- Core Functions ---
+        async function handleFolderSelection(event) {
+            const files = Array.from(event.target.files).filter(file => file.type.startsWith('audio/'));
+            if (files.length === 0) {
+                playlistElement.innerHTML = '<li>未找到音频文件</li>';
+                return;
+            }
+            
+            playlistElement.innerHTML = `<li><div class="loading-indicator">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                正在加载数据...
+            </div></li>`;
+            
+            const promises = files.map(getAudioMetadata);
+            playlistData = await Promise.all(promises);
+            
+            createPlaylist();
+            
+            let initialIndex = 0;
+            if (isShuffle && playlistData.length > 0) {
+                initialIndex = Math.floor(Math.random() * playlistData.length);
+            }
+            playSong(initialIndex);
+        }
+
+        function getAudioMetadata(file) {
+            return new Promise(resolve => {
+                const tagsPromise = new Promise(res => { window.jsmediatags.read(file, { onSuccess: (tag) => res(tag.tags), onError: () => res({}) }); });
+                const durationPromise = new Promise(res => {
+                    const tempAudio = new Audio();
+                    const url = URL.createObjectURL(file);
+                    tempAudio.src = url;
+                    tempAudio.addEventListener('loadedmetadata', () => { res(tempAudio.duration); URL.revokeObjectURL(url); });
+                    tempAudio.addEventListener('error', () => { res(0); URL.revokeObjectURL(url); });
+                });
+                Promise.all([tagsPromise, durationPromise]).then(([tags, duration]) => { resolve({ file, duration, ...tags }); });
+            });
+        }
+
+        function createPlaylist() {
+            playlistElement.innerHTML = '';
+            playlistData.forEach((data, index) => {
+                const li = document.createElement('li');
+                li.dataset.index = index;
+                const title = data.title || data.file.name.replace(/\.[^/.]+$/, "");
+                const artist = data.artist || '未知艺术家';
+                const artistAndAlbum = [artist, data.album].filter(Boolean).join(' • ');
+                li.innerHTML = `
+                    <svg class="play-indicator" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13a2 2 0 0 0 2-2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2-2"/></svg>
+                    <div class="pli-info">
+                        <div class="pli-title marquee-container"></div>
+                        <div class="pli-artist"></div>
+                    </div>
+                    <div class="pli-duration">${formatDuration(data.duration)}</div>
+                `;
+                playlistElement.appendChild(li);
+                const titleContainer = li.querySelector('.pli-title');
+                const artistContainer = li.querySelector('.pli-artist');
+                artistContainer.textContent = artistAndAlbum;
+                applyMarquee(titleContainer, title);
+            });
+        }
+
+        function handlePlaylistClick(event) {
+            const targetLi = event.target.closest('li');
+            if (targetLi && targetLi.dataset.index) {
+                playSong(parseInt(targetLi.dataset.index, 10));
+            }
+        }
+
+        function playSong(index) {
+            if (index < 0 || index >= playlistData.length) return;
+            if (!isApiInitialized) initAudioApi();
+            currentTrackIndex = index;
+            const data = playlistData[index];
+            const fileURL = URL.createObjectURL(data.file);
+            audioPlayer.src = fileURL;
+            audioPlayer.play().catch(e => console.error("Playback failed:", e));
+            updateNowPlaying(data);
+            updatePlaylistUI();
+        }
+
+        function playNextSong() {
+            let nextIndex;
+            if (isShuffle) {
+                if (playlistData.length <= 1) nextIndex = 0;
+                else do { nextIndex = Math.floor(Math.random() * playlistData.length); } while (nextIndex === currentTrackIndex);
+            } else {
+                nextIndex = (currentTrackIndex + 1) % playlistData.length;
+            }
+            playSong(nextIndex);
+        }
+
+        // --- Search Function ---
+        function handleSearch(event) {
+            const query = event.target.value.toLowerCase().trim();
+            const listItems = playlistElement.querySelectorAll('li');
+            if (query === "") {
+                listItems.forEach((item, index) => {
+                    item.style.display = 'flex';
+                    const data = playlistData[index];
+                    const title = data.title || data.file.name.replace(/\.[^/.]+$/, "");
+                    const artist = data.artist || '未知艺术家';
+                    const artistAndAlbum = [artist, data.album].filter(Boolean).join(' • ');
+                    const titleEl = item.querySelector('.pli-title');
+                    const artistEl = item.querySelector('.pli-artist');
+                    artistEl.textContent = artistAndAlbum;
+                    applyMarquee(titleEl, title);
+                });
+                return;
+            }
+            const escapeRegex = str => str.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+            const queryRegex = new RegExp(escapeRegex(query), 'gi');
+            listItems.forEach((item, index) => {
+                const data = playlistData[index];
+                const title = data.title || data.file.name.replace(/\.[^/.]+$/, "");
+                const artist = data.artist || '未知艺术家';
+                const album = data.album || '';
+                const titleMatch = title.toLowerCase().includes(query);
+                const artistMatch = artist.toLowerCase().includes(query);
+                const albumMatch = album.toLowerCase().includes(query);
+                const titleEl = item.querySelector('.pli-title');
+                const artistEl = item.querySelector('.pli-artist');
+                if (titleMatch || artistMatch || albumMatch) {
+                    item.style.display = 'flex';
+                    const highlightedTitle = title.replace(queryRegex, match => `<mark>${match}</mark>`);
+                    applyMarquee(titleEl, highlightedTitle, true);
+                    const artistAndAlbum = [artist, album].filter(Boolean).join(' • ');
+                    const highlightedArtistAlbum = artistAndAlbum.replace(queryRegex, match => `<mark>${match}</mark>`);
+                    artistEl.innerHTML = highlightedArtistAlbum;
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        // --- UI & Visualization ---
+        function updateNowPlaying(data) {
+            applyMarquee(nowPlayingTitle, data.title || '未知曲目');
+            applyMarquee(nowPlayingArtist, data.artist || '未知艺术家');
+            applyMarquee(nowPlayingAlbum, data.album || '');
+        }
+
+        function applyMarquee(container, text, isHighlighting = false) {
+            const textContent = text || '';
+            if (isHighlighting) {
+                container.innerHTML = `<div class="marquee-inner-wrap">${textContent}</div>`;
+            } else {
+                container.innerHTML = `<div class="marquee-inner-wrap"><span>${textContent}</span></div>`;
+            }
+            container.classList.remove('is-overflowing');
+            requestAnimationFrame(() => {
+                const innerWrap = container.querySelector('.marquee-inner-wrap');
+                if (!innerWrap) return;
+                const contentWidth = innerWrap.scrollWidth;
+                if (contentWidth > container.offsetWidth) {
+                    container.classList.add('is-overflowing');
+                    if (!isHighlighting) {
+                        innerWrap.innerHTML = `<span>${textContent}</span><span>${textContent}</span>`;
+                    } else {
+                        innerWrap.innerHTML = `${textContent}${textContent}`;
+                    }
+                }
+            });
+        }
+
+        function updatePlaylistUI() {
+            const listItems = playlistElement.querySelectorAll('li');
+            listItems.forEach((item, index) => {
+                const titleContainer = item.querySelector('.pli-title');
+                if (index === currentTrackIndex) {
+                    item.classList.add('playing');
+                    if (titleContainer) {
+                        const title = playlistData[index].title || playlistData[index].file.name.replace(/\.[^/.]+$/, "");
+                        applyMarquee(titleContainer, title);
+                    }
+                } else {
+                    item.classList.remove('playing');
+                }
+            });
+        }
+        
+        function formatDuration(seconds) {
+            if (isNaN(seconds) || seconds === 0) return '--:--';
+            const min = Math.floor(seconds / 60);
+            const sec = Math.floor(seconds % 60).toString().padStart(2, '0');
+            return `${min}:${sec}`;
+        }
+        
+        function updateProgress() {
+            const { duration, currentTime } = audioPlayer;
+            if (duration) {
+                const progressPercent = (currentTime / duration) * 100;
+                progressFilled.style.width = `${progressPercent}%`;
+            }
+            currentTimeEl.textContent = formatDuration(currentTime);
+        }
+
+        function setProgress(e) {
+            const rect = this.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const width = this.clientWidth;
+            const duration = audioPlayer.duration;
+            if (duration) {
+                audioPlayer.currentTime = (clickX / width) * duration;
+            }
+        }
+
+        function toggleMute() {
+            if (audioPlayer.muted || audioPlayer.volume === 0) {
+                audioPlayer.muted = false;
+                audioPlayer.volume = lastVolume > 0 ? lastVolume : 0.5;
+            } else {
+                lastVolume = audioPlayer.volume;
+                audioPlayer.volume = 0;
+                audioPlayer.muted = true;
+            }
+        }
+
+        function updateVolumeUI(volume, isMuted) {
+            volumeSlider.value = isMuted ? 0 : volume;
+            volumeBtn.className = 'icon-btn volume-btn';
+            if (isMuted || volume === 0) {
+                volumeBtn.classList.add('volume-state-muted');
+            } else if (volume < 0.1) {
+                volumeBtn.classList.add('volume-state-none');
+            } else if (volume < 0.7) {
+                volumeBtn.classList.add('volume-state-low');
+            } else {
+                volumeBtn.classList.add('volume-state-high');
+            }
+        }
+
+        // (Visualization functions are collapsed for brevity, they are unchanged)
+        function initAudioApi() { try { audioContext = new (window.AudioContext || window.webkitAudioContext)(); analyser = audioContext.createAnalyser(); sourceNode = audioContext.createMediaElementSource(audioPlayer); sourceNode.connect(analyser); analyser.connect(audioContext.destination); analyser.fftSize = 256; isApiInitialized = true; } catch (e) { console.error("Web Audio API is not supported.", e); } }
+        function startVisualization() { if (!isApiInitialized) return; if (audioContext.state === 'suspended') audioContext.resume(); visualize(); }
+        function stopVisualization() { cancelAnimationFrame(animationFrameId); }
+        function visualize() { animationFrameId = requestAnimationFrame(visualize); const bufferLength = analyser.frequencyBinCount; const dataArray = new Uint8Array(bufferLength); analyser.getByteFrequencyData(dataArray); const { width, height } = visualizerCanvas; canvasCtx.clearRect(0, 0, width, height); const barWidth = (width / bufferLength) * 1.5; let x = 0; const gradient = canvasCtx.createLinearGradient(0, 0, 0, height); gradient.addColorStop(0, 'rgba(162, 155, 254, 1)'); gradient.addColorStop(1, 'rgba(108, 92, 231, 1)'); canvasCtx.fillStyle = gradient; for (let i = 0; i < bufferLength; i++) { const barHeight = (dataArray[i] / 255) * height; canvasCtx.fillRect(x, height - barHeight, barWidth, barHeight); x += barWidth + 2; } }
+    </script>
+
+</body>
+</html>
